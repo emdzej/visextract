@@ -16,7 +16,8 @@ import (
 
 // Source is a set of files with case-insensitive, '/'-separated names.
 type Source interface {
-	// Open returns the file's contents for positional reads, and its size.
+	// Open returns the file's contents for positional reads, and its size. The reader stays valid
+	// until Close.
 	Open(name string) (io.ReaderAt, int64, error)
 	// List returns the names of the files (not directories) in a directory ("" = the top).
 	List(dir string) ([]string, error)
@@ -38,7 +39,10 @@ func Open(path string) (Source, error) {
 
 // ---- host directory ----
 
-type dirSource struct{ root string }
+type dirSource struct {
+	root  string
+	files []*os.File // closed by Close (Windows can't delete a folder with a file still open in it)
+}
 
 func (d *dirSource) resolve(name string) (string, error) {
 	cur := d.root
@@ -86,7 +90,8 @@ func (d *dirSource) Open(name string) (io.ReaderAt, int64, error) {
 		f.Close()
 		return nil, 0, err
 	}
-	return fileReaderAt{f}, st.Size(), nil // closed with the process: a run opens a handful of files
+	d.files = append(d.files, f)
+	return fileReaderAt{f}, st.Size(), nil
 }
 
 func (d *dirSource) List(dir string) ([]string, error) {
@@ -108,7 +113,17 @@ func (d *dirSource) List(dir string) ([]string, error) {
 }
 
 func (d *dirSource) Describe() string { return d.root + " (folder)" }
-func (d *dirSource) Close() error     { return nil }
+
+func (d *dirSource) Close() error {
+	var first error
+	for _, f := range d.files {
+		if err := f.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	d.files = nil
+	return first
+}
 
 // ---- ISO 9660 image ----
 

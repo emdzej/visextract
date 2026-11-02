@@ -83,6 +83,7 @@ func TestSynthetic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { src.Close() }) // before TempDir's cleanup: Windows won't delete open files
 	a, err := OpenAny(src)
 	if err != nil {
 		t.Fatal(err)
